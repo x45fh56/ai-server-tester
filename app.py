@@ -22,7 +22,7 @@ if hasattr(sys.stdout, "reconfigure"):
 SOURCE_URL = "https://raw.githubusercontent.com/x45fh56/tgs/refs/heads/main/Servers/Protocols/Categorized_Servers/1_VLESS_REALITY_TCP.txt"
 
 CHECK_IP_MODE = "geo"          # Options: "geo" | "api" | None/False
-SLEEP_BETWEEN_CHECKS = 0.7
+SLEEP_BETWEEN_CHECKS = 0.7     # Delay only used in "api" mode
 
 # Directories
 DATA_DIR = Path("data")
@@ -34,8 +34,8 @@ GEOIP_DATABASE_PATH = DATA_DIR / GEOIP_FILENAME
 AUTO_DOWNLOAD_GEOIP = True
 GEOIP_URL = "https://raw.githubusercontent.com/P3TERX/GeoLite.mmdb/download/GeoLite2-ASN.mmdb"
 
-MIN_DB_SIZE = 1_500_000  # bytes
-MAX_AGE_DAYS = 30
+MIN_DB_SIZE = 1_500_000        # bytes - minimum valid database size
+MAX_AGE_DAYS = 30              # warn if database is older than this
 
 BAD_ASN_KEYWORDS = [
     "cloudflare", "fastly", "akamai", "cdn",
@@ -46,7 +46,7 @@ BAD_ASN_KEYWORDS = [
 
 ip_cache = {}
 
-# Output files (numbered for sorting)
+# Output files (numbered for natural sorting in file explorers)
 FILES = {
     "stage1":    "2-reality_ok.txt",
     "final":     "1-valid_clean.txt",
@@ -56,12 +56,12 @@ FILES = {
 # ==========================================
 
 def ensure_directories():
-    """Create directories if they do not exist"""
+    """Create data and output directories if they do not exist"""
     DATA_DIR.mkdir(exist_ok=True)
     OUTPUT_DIR.mkdir(exist_ok=True)
 
 def extract_ip(link):
-    """Extract IP address from vless link"""
+    """Extract IPv4 address from vless link"""
     match = re.match(r'vless://[^@]+@([^:/?#]+)', link)
     if match:
         host = match.group(1)
@@ -70,7 +70,7 @@ def extract_ip(link):
     return None
 
 def quick_filter(link):
-    """Stage 1: Check for Reality + TCP (no WS)"""
+    """Stage 1 filter: must be vless + reality + not websocket"""
     link_lower = link.lower()
     if not link_lower.startswith("vless://"):
         return False
@@ -81,23 +81,23 @@ def quick_filter(link):
     return True
 
 def should_download_geoip():
-    """Check if we need to (re)download the GeoLite2-ASN database"""
+    """Check if GeoLite2-ASN database needs to be downloaded or updated"""
     if not GEOIP_DATABASE_PATH.exists():
         return True
 
     size = GEOIP_DATABASE_PATH.stat().st_size
     if size < MIN_DB_SIZE:
-        print(f"⚠ Existing file is too small ({size:,} bytes) → will re-download")
+        print(f"⚠ Existing file too small ({size:,} bytes) → will re-download")
         return True
 
     mod_time = datetime.fromtimestamp(GEOIP_DATABASE_PATH.stat().st_mtime)
     age = datetime.now() - mod_time
 
     if age > timedelta(days=MAX_AGE_DAYS):
-        print(f"⚠ Database is old ({age.days} days) → manual update recommended")
-        return False  # Change to True if you want auto-update
+        print(f"⚠ Database is old ({age.days} days old) → manual update recommended")
+        return False  # Set to True if you want automatic update
 
-    print(f"✓ GeoLite2-ASN database exists (age: {age.days} days, size: {size:,} bytes)")
+    print(f"✓ GeoLite2-ASN database found (age: {age.days} days, size: {size:,} bytes)")
     return False
 
 def download_geoip_database():
@@ -105,7 +105,7 @@ def download_geoip_database():
     if not should_download_geoip():
         return True
 
-    print(f"⏳ Downloading database to {DATA_DIR} ...")
+    print(f"⏳ Downloading GeoLite2-ASN database to {DATA_DIR} ...")
     try:
         with requests.get(GEOIP_URL, timeout=60, stream=True) as r:
             r.raise_for_status()
@@ -127,7 +127,7 @@ def download_geoip_database():
         return False
 
 def check_ip_with_geoasn(ip):
-    """Check if IP belongs to a suspicious ASN / datacenter using GeoLite2-ASN"""
+    """Check if IP belongs to suspicious ASN/datacenter using GeoLite2-ASN"""
     if ip in ip_cache:
         return ip_cache[ip]
 
@@ -164,28 +164,28 @@ def check_ip_with_geoasn(ip):
         return "error"
 
 def save_file(key, data):
-    """Save list to file in output directory"""
+    """Save list of links to file in output directory"""
     filename = FILES[key]
     full_path = OUTPUT_DIR / filename
     try:
         with open(full_path, "w", encoding="utf-8") as f:
             f.write("\n".join(data) + "\n")
-        print(f"✔ {filename} → {len(data)} links saved in output/")
+        print(f"✔ Saved: {filename} → {len(data)} links in output/")
     except Exception as e:
         print(f"✘ Error saving {filename}: {e}")
 
 def main():
     ensure_directories()
 
-    print("Starting server check...\n")
+    print("Starting VLESS server check...\n")
 
-    # Download the list of links
+    # Download list of links
     try:
         r = requests.get(SOURCE_URL, timeout=15)
         r.raise_for_status()
         links = [l.strip() for l in r.text.splitlines() if l.strip() and not l.strip().startswith('#')]
     except Exception as e:
-        print(f"❌ Failed to download list: {e}")
+        print(f"❌ Failed to download link list: {e}")
         return
 
     print(f"Received {len(links)} links")
@@ -208,7 +208,7 @@ def main():
         print("IP checking disabled or unknown mode → only stage 1 applied")
         final_clean = stage1_pass[:]
     else:
-        print("Starting IP check with GeoLite2-ASN...")
+        print("Starting IP check using GeoLite2-ASN...")
         download_geoip_database()  # Downloads only if needed
 
         for link in stage1_pass:
@@ -226,7 +226,9 @@ def main():
                 isp_problem.append(link)
                 print(f"  ❌ BAD  | {ip} → {status}")
 
-            time.sleep(SLEEP_BETWEEN_CHECKS)
+            # Sleep only when using external API (rate limit protection)
+            if CHECK_IP_MODE == "api":
+                time.sleep(SLEEP_BETWEEN_CHECKS)
 
     print("\n" + "═" * 60 + "\n")
 
@@ -236,9 +238,9 @@ def main():
     save_file("rejected", rejected_stage1)
 
     print("\nSummary:")
-    print(f"  • Ready to use: {len(final_clean)}")
-    print(f"  • Suspicious ISP / datacenter: {len(isp_problem)}")
-    print("Files saved in output/ folder, database in data/ folder.")
+    print(f"  • Ready to use (clean): {len(final_clean)}")
+    print(f"  • Suspicious ISP/datacenter: {len(isp_problem)}")
+    print("Files saved in output/ folder, database stored in data/ folder.")
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
