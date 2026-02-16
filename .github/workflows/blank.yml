@@ -1,0 +1,58 @@
+name: Daily VLESS Checker 
+
+on:
+  schedule:
+    - cron: '30 11 * * *'  
+
+  workflow_dispatch:
+
+permissions:
+  contents: write  
+
+jobs:
+  check-servers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'     
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests geoip2
+
+      - name: Download GeoLite2-ASN database (if needed)
+        run: |
+          
+          python app.py   # اسم فایل پایتون خودتان را اینجا بگذارید
+
+      - name: Run the VLESS checker script
+        run: python app.py    
+
+       - name: Commit and push results (optional)
+        if: always()    
+        run: |
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
+          
+          git add output/*.txt
+          git add data/*.mmdb
+          
+          git diff --quiet && git diff --staged --quiet || git commit -m "Update: daily vless check results - $(date +'%Y-%m-%d %H:%M')"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Show summary
+        if: always()
+        run: |
+          echo "Finished at $(date)"
+          echo "Final clean servers:"
+          wc -l output/2-valid_clean.txt || echo "No clean servers"
