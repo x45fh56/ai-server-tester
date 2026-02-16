@@ -1,94 +1,89 @@
 name: Daily VLESS Reality Checker
 
-# When to run the workflow
 on:
-  # Scheduled: every day at 11:30 UTC → 15:00 Iran Time (IRST = UTC+3:30)
   schedule:
-    - cron: '30 11 * * *'
+    - cron: '30 11 * * *'   # 11:30 UTC = 15:00 Iran Time
 
-  # Manual trigger from GitHub Actions tab
   workflow_dispatch:
 
-# Required permissions to commit & push back to repo
 permissions:
   contents: write
 
 jobs:
   check-and-update:
     runs-on: ubuntu-latest
-    timeout-minutes: 25   # Enough time even for large lists
+    timeout-minutes: 25
 
     steps:
-      # 1. Clone the repository (with full history)
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # Full history needed for proper git diff/commit
+          fetch-depth: 0   # Full history for accurate git diff
 
-      # 2. Setup Python environment
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
 
-      # 3. Install required packages
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install requests geoip2
 
-      # 4. Run the main checker script
-      - name: Execute VLESS checker script
-        run: python app.py   
-
-      # 5. Debug: Show what was created (very useful for troubleshooting)
-      - name: Debug - List created files
+      - name: Run VLESS checker script
+        run: python app.py  
+        
+      - name: Debug - List files after script run
         if: always()
         run: |
-          echo "Current working directory:"
-          pwd
+          echo "Current directory: $(pwd)"
           echo ""
-          echo "Contents of data/ folder:"
-          ls -la data/ 2>/dev/null || echo "data/ folder not found or empty"
+          echo "data/ folder contents:"
+          ls -la data/ || echo "data/ not found"
           echo ""
-          echo "Contents of output/ folder:"
-          ls -la output/ 2>/dev/null || echo "output/ folder not found or empty"
+          echo "output/ folder contents:"
+          ls -la output/ || echo "output/ not found"
           echo ""
-          echo "Sample content of final clean file (first 5 lines):"
-          head -n 5 output/1-valid_clean.txt 2>/dev/null || echo "No valid_clean file"
+          echo "First few lines of valid_clean.txt:"
+          head -n 5 output/1-valid_clean.txt || echo "File not found"
           echo ""
-          echo "Geo database file status:"
-          ls -lh data/GeoLite2-ASN.mmdb 2>/dev/null || echo "Geo database not found"
+          echo "Geo database size:"
+          ls -lh data/GeoLite2-ASN.mmdb || echo "Geo file not found"
 
-      # 6. Commit & push changes (always attempt commit, even empty)
-      - name: Commit and push updated files
+      - name: Commit and push all changes (force even if empty)
         if: always()
         run: |
           git config --global user.name "GitHub Actions Bot"
           git config --global user.email "actions@github.com"
 
-          # Stage output txt files and geo database
-          git add output/*.txt
-          git add data/*.mmdb   
+          # Show what git sees before adding
+          echo "Git status before add:"
+          git status
 
-          # Force commit even if no changes (to confirm run happened)
-          git commit --allow-empty -m "chore: daily vless reality check run - $(date +'%Y-%m-%d %H:%M UTC')"
+          # Force add all files in output/ and data/
+          git add --force output/
+          git add --force data/
 
-          # Push changes
-          git push || echo "Push skipped (no changes or already up-to-date)"
+          # Show diff to debug
+          echo "Git diff staged:"
+          git diff --staged || echo "No staged changes"
+
+          # Always commit (even empty) to confirm run
+          git commit --allow-empty -m "chore: daily vless reality check run - $(date +'%Y-%m-%d %H:%M UTC') (files updated)"
+
+          # Push
+          git push || echo "Push skipped (already up-to-date or error)"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 7. Final summary in logs
-      - name: Workflow summary
+      - name: Final summary
         if: always()
         run: |
           echo "========================================"
-          echo "Workflow finished at: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-          echo "Python script exit code: $?"
-          echo "Clean servers count:"
-          wc -l output/1-valid_clean.txt 2>/dev/null || echo "No clean servers file"
-          echo "Reality passed count:"
-          wc -l output/2-reality_ok.txt 2>/dev/null || echo "No reality file"
+          echo "Finished at: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "Clean servers:"
+          wc -l output/1-valid_clean.txt 2>/dev/null || echo "No file"
+          echo "Reality passed:"
+          wc -l output/2-reality_ok.txt 2>/dev/null || echo "No file"
           echo "========================================"
