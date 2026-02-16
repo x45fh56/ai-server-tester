@@ -1,15 +1,11 @@
 name: Daily VLESS Reality Checker
 
-# Triggers the workflow
 on:
-  # Scheduled run: every day at 11:30 UTC = 15:00 Iran Time (IRST = UTC+3:30)
   schedule:
-    - cron: '30 11 * * *'
+    - cron: '30 11 * * *'   # 11:30 UTC = 15:00 Iran Time
 
-  # Allows manual trigger from GitHub Actions UI
   workflow_dispatch:
 
-# Permissions needed to commit and push changes back to the repository
 permissions:
   contents: write
 
@@ -19,52 +15,44 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      # Step 1: Clone the repository
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Step 2: Set up Python environment
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      # Step 3: Install required Python packages
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install requests geoip2
 
-      # Step 4: Run the main checker script
-      # The script handles GeoLite2 download automatically if needed
       - name: Run VLESS checker script
-        run: python app.py   # ← Replace 'app.py' with your actual script filename if different
+        run: python app.py    
 
-      # Step 5: Commit and push updated output files (optional but recommended)
-      - name: Commit and push results (if changed)
-        if: always()  # Run even if previous steps fail (for debugging)
+      - name: Commit and push new results & database (if any changes)
+        if: always()
         run: |
           git config --global user.name "GitHub Actions Bot"
           git config --global user.email "actions@github.com"
 
-          # Stage all .txt files in output/
+          # Add all new/changed files in output/ and data/
           git add output/*.txt
+          git add data/*.mmdb    
 
-          # Optional: also commit the GeoLite2 database if you want to version it
-          # git add data/*.mmdb
+          # Only commit if there are actual changes
+          git diff --quiet && git diff --staged --quiet || git commit -m "chore: update daily vless check + geo database - $(date +'%Y-%m-%d %H:%M UTC')"
 
-          # Commit only if there are actual changes
-          git diff --quiet && git diff --staged --quiet || git commit -m "chore: update daily vless check results - $(date +'%Y-%m-%d %H:%M UTC')"
-
-          # Push changes back to the repository
           git push
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Step 6: Print a quick summary (visible in workflow logs)
-      - name: Show summary
+      - name: Show summary in logs
         if: always()
         run: |
           echo "Workflow finished at $(date -u '+%Y-%m-%d %H:%M UTC')"
-          echo "Clean/valid servers count:"
-          wc -l output/1-valid_clean.txt 2>/dev/null || echo "No clean servers found or file missing"
+          echo "Clean servers count:"
+          wc -l output/1-valid_clean.txt 2>/dev/null || echo "No clean file found"
+          echo "Geo database status:"
+          ls -lh data/GeoLite2-ASN.mmdb 2>/dev/null || echo "No geo database file"
