@@ -1,80 +1,58 @@
-name: Daily VLESS Reality Checker
+name: Daily VLESS Checker 
 
 on:
   schedule:
-    - cron: '30 11 * * *'
+    - cron: '30 11 * * *'  
 
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: write  
 
 jobs:
-  check-and-update:
+  check-servers:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 15
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Set up Python 3.11
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          cache: 'pip'
+          python-version: '3.11'     
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install requests geoip2
 
-      - name: Verify script file exists
+      - name: Download GeoLite2-ASN database (if needed)
         run: |
-          ls -la *.py || echo "No .py files found!"
-          cat app.py 2>/dev/null | head -n 10 || echo "app.py not found or empty"
+          
+          python app.py  
 
-      - name: Run VLESS checker script with full debug
+      - name: Run the VLESS checker script
+        run: python app.py    
+
+       - name: Commit and push results (optional)
+        if: always()    
         run: |
-          echo "Running script..."
-          python -u app.py || echo "Script exited with error code $?"
-          echo "Script finished."
-
-      - name: Debug - List files after script
-        if: always()
-        run: |
-          echo "Current dir: $(pwd)"
-          echo "data/ contents:"
-          ls -la data/ || echo "data/ not found"
-          echo "output/ contents:"
-          ls -la output/ || echo "output/ not found"
-          echo "First lines of valid_clean.txt:"
-          head -n 5 output/1-valid_clean.txt || echo "No file"
-          echo "Geo db status:"
-          ls -lh data/GeoLite2-ASN.mmdb || echo "No geo file"
-
-      - name: Commit and push changes
-        if: always()
-        run: |
-          git config --global user.name "GitHub Actions Bot"
-          git config --global user.email "actions@github.com"
-
-          git status
-
-          git add --force output/ data/ || echo "No files to add"
-
-          git diff --staged || echo "No staged changes"
-
-          git commit --allow-empty -m "chore: daily run $(date +'%Y-%m-%d %H:%M UTC')"
-
-          git push || echo "Push skipped"
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
+          
+          git add output/*.txt
+          git add data/*.mmdb
+          
+          git diff --quiet && git diff --staged --quiet || git commit -m "Update: daily vless check results - $(date +'%Y-%m-%d %H:%M')"
+          git push
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Summary
+      - name: Show summary
         if: always()
         run: |
-          echo "Finished: $(date -u)"
-          wc -l output/*.txt 2>/dev/null || echo "No output files"
+          echo "Finished at $(date)"
+          echo "Final clean servers:"
+          wc -l output/2-valid_clean.txt || echo "No clean servers"
