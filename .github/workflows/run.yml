@@ -1,64 +1,46 @@
 name: Daily VLESS Reality Checker
-
 on:
   schedule:
+    # Every day at 11:30 UTC = 15:00 Iran Time (IRST = UTC+3:30)
     - cron: '30 11 * * *'
+  # Allow manual trigger from GitHub Actions UI
   workflow_dispatch:
-
 permissions:
-  contents: write
-
+  contents: write # Required to commit/push changes
 jobs:
-  check-and-update:
+  check-vless-servers:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
-
+    timeout-minutes: 20 # Increased a bit for safety
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install requests geoip2
-
-      - name: Debug - Check script file & run
-        run: |
-          echo "Current directory: $(pwd)"
-          ls -la *.py || echo "No .py files in root!"
-          cat app.py 2>/dev/null | head -n 15 || echo "app.py not found or cannot read"
-          echo "Running script..."
-          python -u app.py || echo "Script crashed with code $?"
-          echo "After script - folders status:"
-          ls -la data/ output/ || echo "Folders missing"
-
-      - name: Commit and push (always attempt)
+      - name: Run VLESS checker script
+        run: python app.py # ← Change to your actual script name if different (e.g. main.py or checker.py)
+      - name: Commit and push results (if changed)
         if: always()
         run: |
           git config --global user.name "GitHub Actions Bot"
           git config --global user.email "actions@github.com"
-
-          git status
-
-          git add --force output/ data/ || echo "No files to add"
-
-          git diff --staged || echo "No changes detected"
-
-          git commit --allow-empty -m "chore: daily run $(date +'%Y-%m-%d %H:%M UTC') - script output"
-          git push || echo "Push skipped"
+          # Only add output files (txt results)
+          git add output/*.txt
+          # Optional: add geoip db only if you want to version it (usually not needed)
+          # git add data/*.mmdb
+          # Commit only if there are changes
+          git diff --quiet && git diff --staged --quiet || git commit -m "chore: update daily vless check results - $(date +'%Y-%m-%d %H:%M UTC')"
+          git push
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Final log summary
+      - name: Show final summary
         if: always()
         run: |
-          echo "Finished at $(date -u)"
-          wc -l output/*.txt 2>/dev/null || echo "No output files generated"
+          echo "Workflow finished at $(date -u)"
+          echo "Clean/valid servers count:"
+          wc -l output/1-valid_clean.txt 2>/dev/null || echo "No clean servers found"
