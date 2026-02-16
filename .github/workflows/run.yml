@@ -1,58 +1,94 @@
 name: Daily VLESS Reality Checker
 
+# When to run the workflow
 on:
+  # Scheduled: every day at 11:30 UTC → 15:00 Iran Time (IRST = UTC+3:30)
   schedule:
-    - cron: '30 11 * * *'   # 11:30 UTC = 15:00 Iran Time
+    - cron: '30 11 * * *'
 
+  # Manual trigger from GitHub Actions tab
   workflow_dispatch:
 
+# Required permissions to commit & push back to repo
 permissions:
   contents: write
 
 jobs:
-  check-vless-servers:
+  check-and-update:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25   # Enough time even for large lists
 
     steps:
+      # 1. Clone the repository (with full history)
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # Full history needed for proper git diff/commit
 
+      # 2. Setup Python environment
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
 
+      # 3. Install required packages
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install requests geoip2
 
-      - name: Run VLESS checker script
-        run: python app.py    
+      # 4. Run the main checker script
+      - name: Execute VLESS checker script
+        run: python app.py   
 
-      - name: Commit and push new results & database (if any changes)
+      # 5. Debug: Show what was created (very useful for troubleshooting)
+      - name: Debug - List created files
+        if: always()
+        run: |
+          echo "Current working directory:"
+          pwd
+          echo ""
+          echo "Contents of data/ folder:"
+          ls -la data/ 2>/dev/null || echo "data/ folder not found or empty"
+          echo ""
+          echo "Contents of output/ folder:"
+          ls -la output/ 2>/dev/null || echo "output/ folder not found or empty"
+          echo ""
+          echo "Sample content of final clean file (first 5 lines):"
+          head -n 5 output/1-valid_clean.txt 2>/dev/null || echo "No valid_clean file"
+          echo ""
+          echo "Geo database file status:"
+          ls -lh data/GeoLite2-ASN.mmdb 2>/dev/null || echo "Geo database not found"
+
+      # 6. Commit & push changes (always attempt commit, even empty)
+      - name: Commit and push updated files
         if: always()
         run: |
           git config --global user.name "GitHub Actions Bot"
           git config --global user.email "actions@github.com"
 
-          # Add all new/changed files in output/ and data/
+          # Stage output txt files and geo database
           git add output/*.txt
-          git add data/*.mmdb    
+          git add data/*.mmdb   
 
-          # Only commit if there are actual changes
-          git diff --quiet && git diff --staged --quiet || git commit -m "chore: update daily vless check + geo database - $(date +'%Y-%m-%d %H:%M UTC')"
+          # Force commit even if no changes (to confirm run happened)
+          git commit --allow-empty -m "chore: daily vless reality check run - $(date +'%Y-%m-%d %H:%M UTC')"
 
-          git push
+          # Push changes
+          git push || echo "Push skipped (no changes or already up-to-date)"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Show summary in logs
+      # 7. Final summary in logs
+      - name: Workflow summary
         if: always()
         run: |
-          echo "Workflow finished at $(date -u '+%Y-%m-%d %H:%M UTC')"
+          echo "========================================"
+          echo "Workflow finished at: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "Python script exit code: $?"
           echo "Clean servers count:"
-          wc -l output/1-valid_clean.txt 2>/dev/null || echo "No clean file found"
-          echo "Geo database status:"
-          ls -lh data/GeoLite2-ASN.mmdb 2>/dev/null || echo "No geo database file"
+          wc -l output/1-valid_clean.txt 2>/dev/null || echo "No clean servers file"
+          echo "Reality passed count:"
+          wc -l output/2-reality_ok.txt 2>/dev/null || echo "No reality file"
+          echo "========================================"
