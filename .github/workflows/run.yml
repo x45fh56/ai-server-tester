@@ -2,7 +2,7 @@ name: Daily VLESS Reality Checker
 
 on:
   schedule:
-    - cron: '30 11 * * *'   # 11:30 UTC = 15:00 Iran Time
+    - cron: '30 11 * * *'
 
   workflow_dispatch:
 
@@ -18,7 +18,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # Full history for accurate git diff
+          fetch-depth: 0
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -31,59 +31,50 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests geoip2
 
-      - name: Run VLESS checker script
-        run: python app.py  
-        
-      - name: Debug - List files after script run
+      - name: Verify script file exists
+        run: |
+          ls -la *.py || echo "No .py files found!"
+          cat app.py 2>/dev/null | head -n 10 || echo "app.py not found or empty"
+
+      - name: Run VLESS checker script with full debug
+        run: |
+          echo "Running script..."
+          python -u app.py || echo "Script exited with error code $?"
+          echo "Script finished."
+
+      - name: Debug - List files after script
         if: always()
         run: |
-          echo "Current directory: $(pwd)"
-          echo ""
-          echo "data/ folder contents:"
+          echo "Current dir: $(pwd)"
+          echo "data/ contents:"
           ls -la data/ || echo "data/ not found"
-          echo ""
-          echo "output/ folder contents:"
+          echo "output/ contents:"
           ls -la output/ || echo "output/ not found"
-          echo ""
-          echo "First few lines of valid_clean.txt:"
-          head -n 5 output/1-valid_clean.txt || echo "File not found"
-          echo ""
-          echo "Geo database size:"
-          ls -lh data/GeoLite2-ASN.mmdb || echo "Geo file not found"
+          echo "First lines of valid_clean.txt:"
+          head -n 5 output/1-valid_clean.txt || echo "No file"
+          echo "Geo db status:"
+          ls -lh data/GeoLite2-ASN.mmdb || echo "No geo file"
 
-      - name: Commit and push all changes (force even if empty)
+      - name: Commit and push changes
         if: always()
         run: |
           git config --global user.name "GitHub Actions Bot"
           git config --global user.email "actions@github.com"
 
-          # Show what git sees before adding
-          echo "Git status before add:"
           git status
 
-          # Force add all files in output/ and data/
-          git add --force output/
-          git add --force data/
+          git add --force output/ data/ || echo "No files to add"
 
-          # Show diff to debug
-          echo "Git diff staged:"
           git diff --staged || echo "No staged changes"
 
-          # Always commit (even empty) to confirm run
-          git commit --allow-empty -m "chore: daily vless reality check run - $(date +'%Y-%m-%d %H:%M UTC') (files updated)"
+          git commit --allow-empty -m "chore: daily run $(date +'%Y-%m-%d %H:%M UTC')"
 
-          # Push
-          git push || echo "Push skipped (already up-to-date or error)"
+          git push || echo "Push skipped"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Final summary
+      - name: Summary
         if: always()
         run: |
-          echo "========================================"
-          echo "Finished at: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-          echo "Clean servers:"
-          wc -l output/1-valid_clean.txt 2>/dev/null || echo "No file"
-          echo "Reality passed:"
-          wc -l output/2-reality_ok.txt 2>/dev/null || echo "No file"
-          echo "========================================"
+          echo "Finished: $(date -u)"
+          wc -l output/*.txt 2>/dev/null || echo "No output files"
